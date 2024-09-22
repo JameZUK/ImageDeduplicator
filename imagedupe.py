@@ -8,6 +8,9 @@ import click
 import logging
 import time
 
+# Increase the pixel limit to 200 million pixels (200MP)
+Image.MAX_IMAGE_PIXELS = 200000000  # Set the max pixel limit to 200MP
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
