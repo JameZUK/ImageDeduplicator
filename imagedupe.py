@@ -23,6 +23,14 @@ DUPLICATE_FILES = 0
 # Register HEIF format to support HEIC files
 pillow_heif.register_heif_opener()
 
+# List of valid image file extensions
+VALID_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.heic', '.webp']
+
+def is_image_file(file_path):
+    """Check if the file is an image based on its extension."""
+    _, ext = os.path.splitext(file_path.lower())
+    return ext in VALID_IMAGE_EXTENSIONS
+
 def load_cache():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'rb') as f:
@@ -35,6 +43,10 @@ def save_cache(cache):
 
 def calculate_phash(image_path):
     global SCANNED_FILES
+    if not is_image_file(image_path):
+        logging.error(f"Skipping non-image file: {image_path}")
+        return None
+    
     try:
         with Image.open(image_path) as img:
             SCANNED_FILES += 1
