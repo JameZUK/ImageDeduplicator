@@ -21,13 +21,14 @@ A Python command-line tool to find and manage duplicate or visually similar imag
 ## Key Features
 
 * **Perceptual Hashing:** Uses `imagehash.phash` to find visually similar images, not just exact file duplicates.
+* **Fuzzy Matching:** Configurable Hamming distance threshold to catch near-duplicates that differ slightly.
 * **Multiple Format Support:** Handles common image formats including JPG, PNG, GIF, BMP, TIFF, WebP, and **HEIC/HEIF**.
 * **Configurable Actions:**
     * `list`: Identifies and lists duplicate sets.
-    * `delete`: Deletes lower-resolution duplicates.
+    * `delete`: Deletes lower-resolution duplicates (with confirmation prompt).
     * `move`: Moves lower-resolution duplicates to a specified directory, preserving relative path structure.
 * **Keeps Highest Resolution:** When duplicates are found, the script defaults to keeping the image with the largest pixel area (width \* height).
-* **Caching System:** Saves computed pHashes to a cache file (`phash_cache.pkl`) to significantly speed up subsequent scans of the same directory.
+* **Smart Caching:** Saves computed pHashes to a JSON cache file with modification-time tracking to detect changed files.
 * **Corrupt File Reporting:** Identifies and can report images that cannot be opened or processed.
 * **Large Image Support:** Configured to handle images up to 200 Megapixels.
 * **User-Friendly CLI:** Built with `click` for clear command-line arguments and help.
@@ -37,14 +38,14 @@ A Python command-line tool to find and manage duplicate or visually similar imag
 
 1.  **Directory Scan:** The script recursively scans the specified input directory for image files based on their extensions.
 2.  **pHash Calculation:** For each valid image file:
-    * It first checks if the image's pHash is already in the cache.
-    * If not cached, it opens the image, calculates its perceptual hash (pHash), and stores it in the cache.
+    * It first checks if the image's pHash is already in the cache and the file hasn't been modified since caching.
+    * If not cached or modified, it opens the image, calculates its perceptual hash (pHash), and stores it in the cache.
     * Corrupt or unreadable images are logged and skipped.
-3.  **Duplicate Identification:** Images are grouped by their pHashes. If multiple images share the same pHash, they are considered a duplicate set.
+3.  **Duplicate Identification:** Images are grouped by their pHashes. With `--threshold 0` (default), only exact pHash matches are grouped. With a higher threshold, images within the specified Hamming distance are grouped together.
 4.  **Resolution Comparison:** Within each duplicate set, the script compares the resolutions (width x height) of the images.
 5.  **Action Execution:** Based on the chosen action (`list`, `delete`, `move`):
     * **List:** Prints the identified duplicate sets and indicates which files are candidates for removal (i.e., not the highest resolution).
-    * **Delete:** Deletes all images in a duplicate set except for the one with the highest resolution.
+    * **Delete:** Deletes all images in a duplicate set except for the one with the highest resolution. Requires confirmation unless `--yes` is passed.
     * **Move:** Moves all images in a duplicate set (except the highest resolution one) to a specified destination directory. The original directory structure relative to the input directory is recreated within the destination directory for the moved files.
 6.  **Summary Report:** After processing, a summary is displayed showing total images scanned, duplicates found, and corrupt images encountered.
 
@@ -62,9 +63,8 @@ A Python command-line tool to find and manage duplicate or visually similar imag
 1.  **Clone the repository (or download the script):**
     ```bash
     git clone <repository_url>
-    cd <repository_directory>
+    cd ImageDeduplicator
     ```
-    Or, simply save the script as `duplicate_image_finder.py`.
 
 2.  **Create a virtual environment (recommended):**
     ```bash
@@ -73,14 +73,6 @@ A Python command-line tool to find and manage duplicate or visually similar imag
     ```
 
 3.  **Install dependencies:**
-    Create a `requirements.txt` file with the following content:
-    ```txt
-    Pillow
-    imagehash
-    pillow_heif
-    click
-    ```
-    Then install them:
     ```bash
     pip install -r requirements.txt
     ```
@@ -90,7 +82,7 @@ A Python command-line tool to find and manage duplicate or visually similar imag
 The script is run from the command line.
 
 ```bash
-python duplicate_image_finder.py <DIRECTORY> [OPTIONS]
+python imagedupe.py <DIRECTORY> [OPTIONS]
 ```
 
 ### Command-Line Options
@@ -98,12 +90,16 @@ python duplicate_image_finder.py <DIRECTORY> [OPTIONS]
 * `DIRECTORY`: (Required) The path to the directory you want to scan for duplicate images.
 * `--action [list|delete|move]`:
     * `list` (default): Lists duplicate image sets and suggests which files to remove.
-    * `delete`: Deletes the identified lower-resolution duplicate images. **Use with caution!**
+    * `delete`: Deletes the identified lower-resolution duplicate images. **Prompts for confirmation** unless `--yes` is passed.
     * `move`: Moves the identified lower-resolution duplicate images to the directory specified by `--destination`.
 * `--destination <PATH>`:
     * Required if `action` is `move`. Specifies the directory where lower-resolution duplicates will be moved.
+* `--threshold <INT>`:
+    * Hamming distance threshold for pHash comparison. Default is `0` (exact match only). Higher values (e.g., `4-8`) will catch more visually similar images but may produce false positives.
 * `--report-corrupt`:
     * If set, lists all files that were found to be corrupt or unreadable during the scan.
+* `--yes` / `-y`:
+    * Skip the confirmation prompt when using `--action delete`.
 * `--help`:
     * Shows the help message and exits.
 
@@ -111,38 +107,48 @@ python duplicate_image_finder.py <DIRECTORY> [OPTIONS]
 
 1.  **List duplicates in `/path/to/your/photos`:**
     ```bash
-    python duplicate_image_finder.py /path/to/your/photos
+    python imagedupe.py /path/to/your/photos
     ```
     Or explicitly:
     ```bash
-    python duplicate_image_finder.py /path/to/your/photos --action list
+    python imagedupe.py /path/to/your/photos --action list
     ```
 
-2.  **Delete lower-resolution duplicates in `/path/to/your/photos`:**
+2.  **Find near-duplicates with a Hamming distance threshold of 4:**
     ```bash
-    # WARNING: This will permanently delete files!
-    # It's highly recommended to run with --action list first.
-    # Consider backing up your photos before running this.
-    python duplicate_image_finder.py /path/to/your/photos --action delete
+    python imagedupe.py /path/to/your/photos --threshold 4
     ```
 
-3.  **Move lower-resolution duplicates from `/path/to/your/photos` to `/path/to/duplicates_backup`:**
+3.  **Delete lower-resolution duplicates in `/path/to/your/photos`:**
     ```bash
-    python duplicate_image_finder.py /path/to/your/photos --action move --destination /path/to/duplicates_backup
+    # This will prompt for confirmation before deleting.
+    # It's recommended to run with --action list first.
+    python imagedupe.py /path/to/your/photos --action delete
+    ```
+
+4.  **Delete duplicates without confirmation (for scripting):**
+    ```bash
+    python imagedupe.py /path/to/your/photos --action delete --yes
+    ```
+
+5.  **Move lower-resolution duplicates from `/path/to/your/photos` to `/path/to/duplicates_backup`:**
+    ```bash
+    python imagedupe.py /path/to/your/photos --action move --destination /path/to/duplicates_backup
     ```
     If a file `/path/to/your/photos/subdir/duplicate.jpg` is moved, it will be placed at `/path/to/duplicates_backup/subdir/duplicate.jpg`.
 
-4.  **List duplicates and report any corrupt image files found:**
+6.  **List duplicates and report any corrupt image files found:**
     ```bash
-    python duplicate_image_finder.py /path/to/your/photos --report-corrupt
+    python imagedupe.py /path/to/your/photos --report-corrupt
     ```
 
 ## The Cache
 
-* The script creates a cache file named `phash_cache.pkl` in the directory where you run the script.
-* This file stores the perceptual hashes of images that have already been processed, keyed by their file paths.
-* On subsequent runs, if an image path is found in the cache, its pHash is loaded directly, significantly speeding up the scanning process, especially for large collections or repeated scans.
-* If you suspect images have been modified without their paths changing, or if you want to force a full rescan, you can delete `phash_cache.pkl` before running the script.
+* The script creates a cache file named `phash_cache.json` inside the scanned directory.
+* This file stores the perceptual hashes and file modification times of images that have already been processed.
+* On subsequent runs, if an image path is found in the cache **and its modification time hasn't changed**, the cached pHash is used directly, significantly speeding up scans.
+* If a file has been modified since it was last cached, its hash is automatically recalculated.
+* To force a full rescan, you can delete `phash_cache.json` before running the script.
 
 ## Handling Corrupt Files
 
@@ -150,21 +156,22 @@ python duplicate_image_finder.py <DIRECTORY> [OPTIONS]
 * These files are added to a list of corrupt files.
 * If you use the `--report-corrupt` flag, this list will be printed at the end of the script's execution.
 * Corrupt files are skipped and do not interfere with the processing of other images.
+* When using `--action delete`, files that cannot be opened for resolution comparison are **not** deleted as a safety measure.
 
 ## HEIC/HEIF Support
 
-The script includes support for `.heic` (High Efficiency Image Container) files, commonly used by Apple devices. This is enabled by the `pillow_heif` library, which registers the HEIF opener with Pillow.
+The script includes support for `.heic` and `.heif` (High Efficiency Image Container/Format) files, commonly used by Apple devices. This is enabled by the `pillow_heif` library, which registers the HEIF opener with Pillow.
 
 ## Important Considerations
 
 * **Backup Your Data:** Before using the `delete` action, it is **strongly recommended** to back up your image directory. Data loss due to accidental deletion is irreversible. Run with `list` first to review.
-* **Cache Staleness:** The cache uses file paths as keys. If an image file is replaced or significantly modified *without its path changing*, the cache will return the old pHash. For a full, fresh scan, delete `phash_cache.pkl`.
+* **Cache Staleness:** The cache tracks file modification times. If a file is modified, its hash is automatically recalculated on the next run.
 * **pHash Limitations:** Perceptual hashing is powerful but not infallible.
     * Extremely similar but distinct images might occasionally produce the same pHash.
     * Conversely, images that a human considers duplicates but have undergone significant transformations (e.g., major crops, artistic filters, large overlays) might have different pHashes.
-    * This script considers images with *identical* pHashes as duplicates.
-* **Tie-Breaking:** If multiple duplicate images share the same highest resolution, the script will keep one of them based on iteration order; the others will be marked for removal/moving. This is generally consistent but not guaranteed to be the "oldest" or "first alphabetically" among those tie-breakers.
-* **Performance:** For very large collections (hundreds of thousands of images), the initial scan can take a significant amount of time. Subsequent scans will be much faster due to caching.
+    * With `--threshold 0`, only images with *identical* pHashes are considered duplicates. Use a higher threshold to catch near-duplicates.
+* **Tie-Breaking:** If multiple duplicate images share the same highest resolution, the script will keep one of them based on iteration order; the others will be marked for removal/moving.
+* **Performance:** For very large collections (hundreds of thousands of images), the initial scan can take a significant amount of time. Subsequent scans will be much faster due to caching. When using `--threshold` > 0, duplicate detection is O(n*g) where g is the number of hash groups, which is slower than exact matching.
 
 ## Contributing
 
